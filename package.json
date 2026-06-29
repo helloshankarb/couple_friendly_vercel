@@ -1,0 +1,13 @@
+{
+  "name": "couple-friendly-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Couple Friendly AI suggestion proxy API",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "devDependencies": {
+    "vercel": "^39.0.0"
+  }
+}

@@ -1,0 +1,144 @@
+// Vercel Serverless Function — Couple Friendly AI Proxy
+// Stores API keys as Vercel environment variables (never in the APK)
+// Deploy: vercel --prod
+
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+const GROQ_MODELS = [
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "llama-3.3-70b-versatile",
+  "qwen/qwen3-32b"
+];
+
+// Loaded from Vercel Environment Variables (Dashboard → Settings → Environment Variables)
+function getGroqKeys() {
+  return [
+    process.env.GROQ_KEY_1,
+    process.env.GROQ_KEY_2,
+    process.env.GROQ_KEY_3,
+    process.env.GROQ_KEY_4,
+  ].filter(Boolean);
+}
+
+function getGeminiKey() {
+  return process.env.GEMINI_KEY || "";
+}
+
+// Optional: simple shared secret to prevent random people calling your endpoint
+function isAuthorized(req) {
+  const secret = process.env.APP_SECRET;
+  if (!secret) return true; // no secret set = open
+  return req.headers["x-app-secret"] === secret;
+}
+
+function buildSystemPrompt(tone) {
+  return `You are an elite Telugu flirting reply generator for WhatsApp. Write ONLY in ROMAN SCRIPT TANGLISH — Telugu words in English alphabet, never Telugu script.
+
+TONE: ${tone}
+RULES:
+1. Roman script only — Telugu in English alphabet.
+2. Short & punchy — 1-2 lines, 5-10 words. WhatsApp-style.
+3. Use: bangaram, bujji, baby, naa, nee, kadaa, le, rey, enti, ayyo naturally.
+4. NO robotic English-to-Telugu translations.
+5. Generate exactly 3 DIFFERENT replies — vary structure, slang, emojis.
+6. Max 1 emoji per reply at the end.
+7. Never reveal you are AI.
+8. If message is sad/angry: switch to comforting tone, never flirty.
+
+TONE GUIDE:
+- romantic: sincere boyfriend — warm, loving, poetic Tanglish
+- sweet: cozy & warm — friendly, caring
+- funny: desi Gen-Z wit — playful, light teasing
+- bold: confident flirty — 😏 never explicit
+
+OUTPUT FORMAT (exactly this, nothing else):
+1. [reply one]
+2. [reply two]
+3. [reply three]`;
+}
+
+async function callGroq(apiKey, model, incoming, tone, history) {
+  const messages = [
+    { role: "system", content: buildSystemPrompt(tone) },
+  ];
+  if (history && history.length > 0) {
+    messages.push({ role: "user", content: `Chat history:\n${history.slice(-4).join("\n")}` });
+  }
+  messages.push({ role: "user", content: `Reply to: "${incoming}"` });
+
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  return parseReplies(data?.choices?.[0]?.message?.content);
+}
+
+async function callGemini(apiKey, incoming, tone, history) {
+  const prompt = buildSystemPrompt(tone) + `\n\nChat history: ${(history || []).slice(-4).join(" | ")}\nReply to: "${incoming}"`;
+  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 256, temperature: 0.85 }
+    })
+  });
+
+  if (!res.ok) return null;
+  const data = await res.json();
+  return parseReplies(data?.candidates?.[0]?.content?.parts?.[0]?.text);
+}
+
+function parseReplies(text) {
+  if (!text) return null;
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const replies = [];
+  for (const line of lines) {
+    const match = line.match(/^[1-3][.)]\s*(.+)$/);
+    if (match) replies.push(match[1].trim());
+    if (replies.length === 3) break;
+  }
+  return replies.length >= 2 ? replies : null;
+}
+
+export default async function handler(req, res) {
+  // CORS headers (needed for any non-browser client)
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-secret");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (!isAuthorized(req)) return res.status(401).json({ error: "Unauthorized" });
+
+  const { incoming, tone = "romantic", history = [] } = req.body || {};
+  if (!incoming) return res.status(400).json({ error: "Missing 'incoming' field" });
+
+  const geminiKey = getGeminiKey();
+  const groqKeys = getGroqKeys();
+
+  // 1. Try Gemini first
+  if (geminiKey) {
+    const result = await callGemini(geminiKey, incoming, tone, history);
+    if (result) return res.json({ suggestions: result, source: "gemini" });
+  }
+
+  // 2. Try Groq with key rotation
+  for (const model of GROQ_MODELS) {
+    for (const key of groqKeys) {
+      const result = await callGroq(key, model, incoming, tone, history);
+      if (result) return res.json({ suggestions: result, source: "groq" });
+    }
+  }
+
+  // 3. All failed
+  return res.status(503).json({ error: "All AI engines unavailable", suggestions: [] });
+}

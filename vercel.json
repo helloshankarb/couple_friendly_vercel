@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "name": "couple-friendly-api",
+  "functions": {
+    "api/suggest.js": {
+      "maxDuration": 30
+    }
+  }
+}
