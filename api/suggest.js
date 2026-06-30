@@ -2,9 +2,10 @@
 // Stores API keys as Vercel environment variables (never in the APK)
 // Deploy: vercel --prod
 
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions";
+const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-// Gemini model fallback chain (if one model is overloaded, try next)
+// Gemini model fallback chain
 // Note: gemini-2.0-flash-lite removed — has limit:0 on free tier projects
 const GEMINI_MODELS = [
   "gemini-2.0-flash",
@@ -15,6 +16,10 @@ const GROQ_MODELS = [
   "meta-llama/llama-4-scout-17b-16e-instruct",
   "llama-3.3-70b-versatile",
   "qwen/qwen3-32b"
+];
+
+const NVIDIA_MODELS = [
+  "nvidia/nemotron-3-ultra-550b-a55b",
 ];
 
 // Loaded from Vercel Environment Variables (Dashboard → Settings → Environment Variables)
@@ -37,6 +42,19 @@ function getGroqKeys() {
     process.env.GROQ_KEY_6,
     process.env.GROQ_KEY_7,
     process.env.GROQ_KEY_8,
+  ].filter(Boolean));
+}
+
+function getNvidiaKeys() {
+  return shuffle([
+    process.env.NVIDIA_KEY_1,
+    process.env.NVIDIA_KEY_2,
+    process.env.NVIDIA_KEY_3,
+    process.env.NVIDIA_KEY_4,
+    process.env.NVIDIA_KEY_5,
+    process.env.NVIDIA_KEY_6,
+    process.env.NVIDIA_KEY_7,
+    process.env.NVIDIA_KEY_8,
   ].filter(Boolean));
 }
 
@@ -120,6 +138,39 @@ async function callGroq(apiKey, model, incoming, tone, history) {
   }
 }
 
+async function callNvidia(apiKey, model, incoming, tone, history) {
+  const messages = [
+    { role: "system", content: buildSystemPrompt(tone) },
+  ];
+  if (history && history.length > 0) {
+    messages.push({ role: "user", content: `Chat history:\n${history.slice(-4).join("\n")}` });
+  }
+  messages.push({ role: "user", content: `Reply to: "${incoming}"` });
+
+  try {
+    const res = await fetch(NVIDIA_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody?.error?.message || res.statusText;
+      console.error(`[NVIDIA] ${model} HTTP ${res.status}: ${msg}`);
+      return { error: `NVIDIA ${res.status}: ${msg}` };
+    }
+    const data = await res.json();
+    return parseReplies(data?.choices?.[0]?.message?.content);
+  } catch (e) {
+    console.error(`[NVIDIA] ${model} exception: ${e.message}`);
+    return { error: `NVIDIA exception: ${e.message}` };
+  }
+}
+
 async function callGemini(apiKey, model, incoming, tone, history) {
   const prompt = buildSystemPrompt(tone) + `\n\nChat history: ${(history || []).slice(-4).join(" | ")}\nReply to: "${incoming}"`;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -186,14 +237,33 @@ export default async function handler(req, res) {
   if (!incoming) return res.status(400).json({ error: "Missing 'incoming' field" });
 
   const geminiKeys = getGeminiKeys();
-  const groqKeys = getGroqKeys();
+  const groqKeys   = getGroqKeys();
+  const nvidiaKeys = getNvidiaKeys();
 
   let lastError = "No API keys configured";
 
-  // ── provider override: "gemini" or "groq" forces a specific engine ──
-  // "auto" (default): Groq first, Gemini fallback
-  const tryGroq  = provider !== "gemini";
-  const tryGemini = provider !== "groq";
+  // provider: "auto" | "groq" | "gemini" | "nvidia"
+  // "auto": NVIDIA → Groq → Gemini (best model first, graceful fallback)
+  const tryNvidia = provider === "auto" || provider === "nvidia";
+  const tryGroq   = provider === "auto" || provider === "groq";
+  const tryGemini = provider === "auto" || provider === "gemini";
+
+  if (tryNvidia) {
+    for (const model of NVIDIA_MODELS) {
+      for (const key of nvidiaKeys) {
+        const result = await callNvidia(key, model, incoming, tone, history);
+        if (Array.isArray(result)) {
+          return res.json({ suggestions: result, source: `nvidia/${model}` });
+        }
+        if (result?.error) lastError = result.error;
+      }
+    }
+    if (provider === "nvidia") {
+      console.error(`[suggest] All NVIDIA keys failed. Last: ${lastError}`);
+      return res.status(503).json({ error: "All NVIDIA engines unavailable", lastError, suggestions: [] });
+    }
+    console.warn(`[suggest] NVIDIA failed. Falling back to Groq.`);
+  }
 
   if (tryGroq) {
     for (const model of GROQ_MODELS) {
@@ -205,11 +275,11 @@ export default async function handler(req, res) {
         if (result?.error) lastError = result.error;
       }
     }
-    if (!tryGemini) {
+    if (provider === "groq") {
       console.error(`[suggest] All Groq keys failed. Last: ${lastError}`);
       return res.status(503).json({ error: "All Groq engines unavailable", lastError, suggestions: [] });
     }
-    console.warn(`[suggest] All Groq keys failed. Falling back to Gemini.`);
+    console.warn(`[suggest] Groq failed. Falling back to Gemini.`);
   }
 
   if (tryGemini) {
@@ -222,7 +292,7 @@ export default async function handler(req, res) {
         if (result?.error) lastError = result.error;
       }
     }
-    if (!tryGroq) {
+    if (provider === "gemini") {
       console.error(`[suggest] All Gemini keys failed. Last: ${lastError}`);
       return res.status(503).json({ error: "All Gemini engines unavailable", lastError, suggestions: [] });
     }
