@@ -6,12 +6,11 @@ const GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions";
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// Gemini model fallback chain (newest/best first)
+// Gemini model fallback chain — lite first (faster ~2-3s), flash fallback
 // All confirmed on free tier as of June 2026
-// Note: gemini-2.0-flash-lite excluded — has limit:0 on some free tier projects
 const GEMINI_MODELS = [
-  "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
   "gemini-2.0-flash",
 ];
 
@@ -178,7 +177,8 @@ async function callGroq(apiKey, model, incoming, tone, history) {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
+      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 }),
+      signal: AbortSignal.timeout(7000)
     });
 
     if (!res.ok) {
@@ -212,7 +212,8 @@ async function callNvidia(apiKey, model, incoming, tone, history) {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
+      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 }),
+      signal: AbortSignal.timeout(8000)
     });
 
     if (!res.ok) {
@@ -239,7 +240,8 @@ async function callGemini(apiKey, model, incoming, tone, history) {
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 256, temperature: 0.85 }
-      })
+      }),
+      signal: AbortSignal.timeout(7000)
     });
 
     if (!res.ok) {
