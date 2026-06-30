@@ -8,7 +8,7 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GEMINI_MODELS = [
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-  "gemini-1.5-flash-8b"
+  "gemini-2.0-flash-lite"
 ];
 
 const GROQ_MODELS = [
@@ -124,7 +124,13 @@ async function callGemini(apiKey, model, incoming, tone, history) {
       return { error: `Gemini ${res.status}: ${msg}` };
     }
     const data = await res.json();
-    return parseReplies(data?.candidates?.[0]?.content?.parts?.[0]?.text);
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const parsed = parseReplies(rawText);
+    if (!parsed) {
+      console.error(`[Gemini] ${model} parse failed. Raw: ${String(rawText).slice(0, 200)}`);
+      return { error: `Gemini ${model} parse failed: ${String(rawText).slice(0, 100)}` };
+    }
+    return parsed;
   } catch (e) {
     console.error(`[Gemini] ${model} exception: ${e.message}`);
     return { error: `Gemini exception: ${e.message}` };
