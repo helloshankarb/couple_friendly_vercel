@@ -258,27 +258,26 @@ export default async function handler(req, res) {
   let lastError = "No API keys configured";
 
   // provider: "auto" | "groq" | "gemini" | "nvidia"
-  // "auto": Groq first → Gemini fallback (NVIDIA excluded — too slow for 10s Vercel timeout)
-  // Use "nvidia" explicitly in Postman/testing only
+  // "auto": Gemini first (best quality) → Groq fallback → NVIDIA explicit only
   const tryNvidia = provider === "nvidia";
   const tryGroq   = provider === "auto" || provider === "groq";
   const tryGemini = provider === "auto" || provider === "gemini";
 
-  if (tryNvidia) {
-    for (const model of NVIDIA_MODELS) {
-      for (const key of nvidiaKeys) {
-        const result = await callNvidia(key, model, incoming, tone, history);
+  if (tryGemini) {
+    for (const model of GEMINI_MODELS) {
+      for (const key of geminiKeys) {
+        const result = await callGemini(key, model, incoming, tone, history);
         if (Array.isArray(result)) {
-          return res.json({ suggestions: result, source: `nvidia/${model}` });
+          return res.json({ suggestions: result, source: `gemini/${model}` });
         }
         if (result?.error) lastError = result.error;
       }
     }
-    if (provider === "nvidia") {
-      console.error(`[suggest] All NVIDIA keys failed. Last: ${lastError}`);
-      return res.status(503).json({ error: "All NVIDIA engines unavailable", lastError, suggestions: [] });
+    if (provider === "gemini") {
+      console.error(`[suggest] All Gemini keys failed. Last: ${lastError}`);
+      return res.status(503).json({ error: "All Gemini engines unavailable", lastError, suggestions: [] });
     }
-    console.warn(`[suggest] NVIDIA failed. Falling back to Groq.`);
+    console.warn(`[suggest] Gemini failed. Falling back to Groq.`);
   }
 
   if (tryGroq) {
@@ -295,25 +294,23 @@ export default async function handler(req, res) {
       console.error(`[suggest] All Groq keys failed. Last: ${lastError}`);
       return res.status(503).json({ error: "All Groq engines unavailable", lastError, suggestions: [] });
     }
-    console.warn(`[suggest] Groq failed. Falling back to Gemini.`);
+    console.warn(`[suggest] Groq failed. Falling back to NVIDIA.`);
   }
-
-  if (tryGemini) {
-    for (const model of GEMINI_MODELS) {
-      for (const key of geminiKeys) {
-        const result = await callGemini(key, model, incoming, tone, history);
+  if (tryNvidia) {
+    for (const model of NVIDIA_MODELS) {
+      for (const key of nvidiaKeys) {
+        const result = await callNvidia(key, model, incoming, tone, history);
         if (Array.isArray(result)) {
-          return res.json({ suggestions: result, source: `gemini/${model}` });
+          return res.json({ suggestions: result, source: `nvidia/${model}` });
         }
         if (result?.error) lastError = result.error;
       }
     }
-    if (provider === "gemini") {
-      console.error(`[suggest] All Gemini keys failed. Last: ${lastError}`);
-      return res.status(503).json({ error: "All Gemini engines unavailable", lastError, suggestions: [] });
+    if (provider === "nvidia") {
+      console.error(`[suggest] All NVIDIA keys failed. Last: ${lastError}`);
+      return res.status(503).json({ error: "All NVIDIA engines unavailable", lastError, suggestions: [] });
     }
   }
-
   // 3. All failed
   console.error(`[suggest] All engines failed. Last error: ${lastError}`);
   return res.status(503).json({ error: "All AI engines unavailable", lastError, suggestions: [] });
