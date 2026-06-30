@@ -227,11 +227,16 @@ async function callNvidia(apiKey, model, incoming, tone, history) {
 
 async function callGemini(apiKey, model, incoming, tone, history) {
   const prompt = buildSystemPrompt(tone) + `\n\nChat history: ${(history || []).slice(-4).join(" | ")}\nReply to: "${incoming}"`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  // AQ. prefix = OAuth2 bearer token; AIzaSy = standard API key
+  const isBearer = apiKey.startsWith("AQ.");
+  const url = isBearer
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const authHeader = isBearer ? { "Authorization": `Bearer ${apiKey}` } : {};
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeader },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: 256, temperature: 0.85 }
