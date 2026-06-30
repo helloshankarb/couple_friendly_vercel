@@ -190,30 +190,24 @@ export default async function handler(req, res) {
 
   let lastError = "No API keys configured";
 
-  // ── Phase 1: Gemini — best model first, try ALL keys before falling back ──
-  // Strategy: exhaust all keys on gemini-2.0-flash before trying gemini-1.5-flash, etc.
-  // This maximises free-tier quota usage across multiple accounts.
-  for (const model of GEMINI_MODELS) {
-    for (const key of geminiKeys) {
-      const result = await callGemini(key, model, incoming, tone, history);
-      if (Array.isArray(result)) {
-        return res.json({ suggestions: result, source: `gemini/${model}` });
-      }
-      if (result?.error) {
-        lastError = result.error;
-        // If this key hit a hard quota (429) skip remaining models for this key
-        // by just recording the error — the outer loop moves to the next key automatically
-      }
-    }
-  }
-
-  // ── Phase 2: Groq fallback — only reached if ALL Gemini keys/models failed ──
-  console.warn(`[suggest] All Gemini keys failed (${geminiKeys.length} keys × ${GEMINI_MODELS.length} models). Falling back to Groq.`);
+  // ── Phase 1: Groq — fast, reliable, free tier ──
   for (const model of GROQ_MODELS) {
     for (const key of groqKeys) {
       const result = await callGroq(key, model, incoming, tone, history);
       if (Array.isArray(result)) {
         return res.json({ suggestions: result, source: `groq/${model}` });
+      }
+      if (result?.error) lastError = result.error;
+    }
+  }
+
+  // ── Phase 2: Gemini fallback — only reached if ALL Groq keys/models failed ──
+  console.warn(`[suggest] All Groq keys failed (${groqKeys.length} keys × ${GROQ_MODELS.length} models). Falling back to Gemini.`);
+  for (const model of GEMINI_MODELS) {
+    for (const key of geminiKeys) {
+      const result = await callGemini(key, model, incoming, tone, history);
+      if (Array.isArray(result)) {
+        return res.json({ suggestions: result, source: `gemini/${model}` });
       }
       if (result?.error) lastError = result.error;
     }
