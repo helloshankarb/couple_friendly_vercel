@@ -18,24 +18,40 @@ const GROQ_MODELS = [
 ];
 
 // Loaded from Vercel Environment Variables (Dashboard → Settings → Environment Variables)
+function shuffle(arr) {
+  // Fisher-Yates shuffle — randomize key order on every request
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 function getGroqKeys() {
-  return [
+  return shuffle([
     process.env.GROQ_KEY_1,
     process.env.GROQ_KEY_2,
     process.env.GROQ_KEY_3,
     process.env.GROQ_KEY_4,
-  ].filter(Boolean);
+    process.env.GROQ_KEY_5,
+    process.env.GROQ_KEY_6,
+    process.env.GROQ_KEY_7,
+    process.env.GROQ_KEY_8,
+  ].filter(Boolean));
 }
 
 function getGeminiKeys() {
-  return [
+  return shuffle([
     process.env.GEMINI_KEY_1,
     process.env.GEMINI_KEY_2,
     process.env.GEMINI_KEY_3,
     process.env.GEMINI_KEY_4,
-    // Legacy single key still works
-    process.env.GEMINI_KEY,
-  ].filter(Boolean);
+    process.env.GEMINI_KEY_5,
+    process.env.GEMINI_KEY_6,
+    process.env.GEMINI_KEY_7,
+    process.env.GEMINI_KEY_8,
+    process.env.GEMINI_KEY, // legacy single key
+  ].filter(Boolean));
 }
 
 // Optional: simple shared secret to prevent random people calling your endpoint
