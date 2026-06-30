@@ -256,8 +256,9 @@ export default async function handler(req, res) {
   let lastError = "No API keys configured";
 
   // provider: "auto" | "groq" | "gemini" | "nvidia"
-  // "auto": NVIDIA → Groq → Gemini (best model first, graceful fallback)
-  const tryNvidia = provider === "auto" || provider === "nvidia";
+  // "auto": Groq first → Gemini fallback (NVIDIA excluded — too slow for 10s Vercel timeout)
+  // Use "nvidia" explicitly in Postman/testing only
+  const tryNvidia = provider === "nvidia";
   const tryGroq   = provider === "auto" || provider === "groq";
   const tryGemini = provider === "auto" || provider === "gemini";
 
