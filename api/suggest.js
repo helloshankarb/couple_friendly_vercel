@@ -120,9 +120,47 @@ OUTPUT FORMAT — exactly this, nothing else:
 3. [reply]`;
 }
 
+// Few-shot examples per tone — teaches LLaMA/NVIDIA the exact style via conversation
+function buildFewShotMessages(tone) {
+  const examples = {
+    romantic: [
+      { user: 'Reply to: "Good morning"',
+        assistant: '1. Nee gurinchi aalochistune melakaindi bujji 😊\n2. Morning cheppinav, naa roju maari poyindi le\n3. Nuvvu message chesthe entha happy ga untundi ra' },
+      { user: 'Reply to: "Miss avutunna"',
+        assistant: '1. Ayyo, nenu kuda ra — ikkade unna kada\n2. Cheppu cheppu, ela miss avutunnav\n3. Nee miss ki nenu already ikkade unna le da 🥺' },
+    ],
+    sweet: [
+      { user: 'Reply to: "Ela unnav"',
+        assistant: '1. Nuvvu message chesthe chala bagundi le 😊\n2. Nee message choodangane better aipoyindi\n3. Ippudu chala bagunnanu, nee valla' },
+      { user: 'Reply to: "Busy ga unnava"',
+        assistant: '1. Nee kosam time untundi kada ra, cheppu\n2. Busy ayina nee message ki reply cheyyadam aapanu le\n3. Enti, miss ayyava ikkade 😄' },
+    ],
+    funny: [
+      { user: 'Reply to: "Nenu beautiful ga unnana"',
+        assistant: '1. Nuvve cheppukovadam fair kadu ra 😂\n2. Ayyo, ila direct ga adugutav enti\n3. Mirror choodు, adhe chepthundi le' },
+      { user: 'Reply to: "Naku boring ga undi"',
+        assistant: '1. Enti, nenu ledanukuntunnava 😒\n2. Boring ante nenu ledu ani artha kada ra\n3. Cheppu, nenu vastanu — boring fix chestanu le' },
+    ],
+    bold: [
+      { user: 'Reply to: "Nenu cute ga unnana"',
+        assistant: '1. Chala cute — problem enti ante forget avvadam ledu 😏\n2. Cute kaadu, dangerous unnav\n3. Ala adugutav enti, already telusu kada niku' },
+      { user: 'Reply to: "Naku nuvvante ishtam"',
+        assistant: '1. Telusu, adi cheppinchukovadaniki time pedesav 😏\n2. Cheppakapothe naaku telustu undadu anukunnava\n3. Ikkade unna kada ra, cheppu direct ga' },
+    ],
+  };
+  const toneExamples = examples[tone] || examples.romantic;
+  const messages = [];
+  for (const ex of toneExamples) {
+    messages.push({ role: "user", content: ex.user });
+    messages.push({ role: "assistant", content: ex.assistant });
+  }
+  return messages;
+}
+
 async function callGroq(apiKey, model, incoming, tone, history) {
   const messages = [
     { role: "system", content: buildSystemPrompt(tone) },
+    ...buildFewShotMessages(tone),
   ];
   if (history && history.length > 0) {
     messages.push({ role: "user", content: `Chat history:\n${history.slice(-4).join("\n")}` });
@@ -156,6 +194,7 @@ async function callGroq(apiKey, model, incoming, tone, history) {
 async function callNvidia(apiKey, model, incoming, tone, history) {
   const messages = [
     { role: "system", content: buildSystemPrompt(tone) },
+    ...buildFewShotMessages(tone),
   ];
   if (history && history.length > 0) {
     messages.push({ role: "user", content: `Chat history:\n${history.slice(-4).join("\n")}` });
