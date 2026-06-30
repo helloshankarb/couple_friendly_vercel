@@ -4,6 +4,7 @@
 
 const GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions";
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 // Gemini model fallback chain (newest/best first)
 // All confirmed on free tier as of June 2026
@@ -227,7 +228,7 @@ async function callNvidia(apiKey, model, incoming, tone, history) {
 
 async function callGemini(apiKey, model, incoming, tone, history) {
   const prompt = buildSystemPrompt(tone) + `\n\nChat history: ${(history || []).slice(-4).join(" | ")}\nReply to: "${incoming}"`;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const url = `${GEMINI_URL}/${model}:generateContent?key=${apiKey}`;
   try {
     const res = await fetch(url, {
       method: "POST",
