@@ -5,11 +5,13 @@
 const GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions";
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-// Gemini model fallback chain
-// Note: gemini-2.0-flash-lite removed — has limit:0 on free tier projects
+// Gemini model fallback chain (newest/best first)
+// All confirmed on free tier as of June 2026
+// Note: gemini-2.0-flash-lite excluded — has limit:0 on some free tier projects
 const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
-  "gemini-1.5-flash",
 ];
 
 const GROQ_MODELS = [
