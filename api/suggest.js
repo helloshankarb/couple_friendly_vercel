@@ -3,7 +3,6 @@
 // Deploy: vercel --prod
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 // Gemini model fallback chain (if one model is overloaded, try next)
 const GEMINI_MODELS = [
@@ -81,18 +80,28 @@ async function callGroq(apiKey, model, incoming, tone, history) {
   }
   messages.push({ role: "user", content: `Reply to: "${incoming}"` });
 
-  const res = await fetch(GROQ_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
-  });
+  try {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ model, messages, max_tokens: 256, temperature: 0.85 })
+    });
 
-  if (!res.ok) return null;
-  const data = await res.json();
-  return parseReplies(data?.choices?.[0]?.message?.content);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody?.error?.message || res.statusText;
+      console.error(`[Groq] ${model} HTTP ${res.status}: ${msg}`);
+      return { error: `Groq ${res.status}: ${msg}` };
+    }
+    const data = await res.json();
+    return parseReplies(data?.choices?.[0]?.message?.content);
+  } catch (e) {
+    console.error(`[Groq] ${model} exception: ${e.message}`);
+    return { error: `Groq exception: ${e.message}` };
+  }
 }
 
 async function callGemini(apiKey, model, incoming, tone, history) {
@@ -124,14 +133,21 @@ async function callGemini(apiKey, model, incoming, tone, history) {
 
 function parseReplies(text) {
   if (!text) return null;
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const clean = text.replace(/\*\*/g, "").trim();
+  const lines = clean.split("\n").map(l => l.trim()).filter(Boolean);
   const replies = [];
   for (const line of lines) {
-    const match = line.match(/^[1-3][.)]\s*(.+)$/);
+    // Match: "1. reply", "1) reply", "- reply", or bare lines if we only have 3
+    const match = line.match(/^(?:[1-3][.)\s]|[-•]\s*)(.+)$/);
     if (match) replies.push(match[1].trim());
     if (replies.length === 3) break;
   }
-  return replies.length >= 2 ? replies : null;
+  // Fallback: if numbered parsing failed, take first 3 non-empty lines
+  if (replies.length < 2) {
+    const bare = lines.filter(l => l.length > 5).slice(0, 3);
+    return bare.length >= 2 ? bare : null;
+  }
+  return replies;
 }
 
 export default async function handler(req, res) {
