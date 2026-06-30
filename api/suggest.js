@@ -182,7 +182,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   if (!isAuthorized(req)) return res.status(401).json({ error: "Unauthorized" });
 
-  const { incoming, tone = "romantic", history = [] } = req.body || {};
+  const { incoming, tone = "romantic", history = [], provider = "auto" } = req.body || {};
   if (!incoming) return res.status(400).json({ error: "Missing 'incoming' field" });
 
   const geminiKeys = getGeminiKeys();
@@ -190,26 +190,41 @@ export default async function handler(req, res) {
 
   let lastError = "No API keys configured";
 
-  // ── Phase 1: Groq — fast, reliable, free tier ──
-  for (const model of GROQ_MODELS) {
-    for (const key of groqKeys) {
-      const result = await callGroq(key, model, incoming, tone, history);
-      if (Array.isArray(result)) {
-        return res.json({ suggestions: result, source: `groq/${model}` });
+  // ── provider override: "gemini" or "groq" forces a specific engine ──
+  // "auto" (default): Groq first, Gemini fallback
+  const tryGroq  = provider !== "gemini";
+  const tryGemini = provider !== "groq";
+
+  if (tryGroq) {
+    for (const model of GROQ_MODELS) {
+      for (const key of groqKeys) {
+        const result = await callGroq(key, model, incoming, tone, history);
+        if (Array.isArray(result)) {
+          return res.json({ suggestions: result, source: `groq/${model}` });
+        }
+        if (result?.error) lastError = result.error;
       }
-      if (result?.error) lastError = result.error;
     }
+    if (!tryGemini) {
+      console.error(`[suggest] All Groq keys failed. Last: ${lastError}`);
+      return res.status(503).json({ error: "All Groq engines unavailable", lastError, suggestions: [] });
+    }
+    console.warn(`[suggest] All Groq keys failed. Falling back to Gemini.`);
   }
 
-  // ── Phase 2: Gemini fallback — only reached if ALL Groq keys/models failed ──
-  console.warn(`[suggest] All Groq keys failed (${groqKeys.length} keys × ${GROQ_MODELS.length} models). Falling back to Gemini.`);
-  for (const model of GEMINI_MODELS) {
-    for (const key of geminiKeys) {
-      const result = await callGemini(key, model, incoming, tone, history);
-      if (Array.isArray(result)) {
-        return res.json({ suggestions: result, source: `gemini/${model}` });
+  if (tryGemini) {
+    for (const model of GEMINI_MODELS) {
+      for (const key of geminiKeys) {
+        const result = await callGemini(key, model, incoming, tone, history);
+        if (Array.isArray(result)) {
+          return res.json({ suggestions: result, source: `gemini/${model}` });
+        }
+        if (result?.error) lastError = result.error;
       }
-      if (result?.error) lastError = result.error;
+    }
+    if (!tryGroq) {
+      console.error(`[suggest] All Gemini keys failed. Last: ${lastError}`);
+      return res.status(503).json({ error: "All Gemini engines unavailable", lastError, suggestions: [] });
     }
   }
 
