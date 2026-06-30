@@ -5,6 +5,13 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
+// Gemini model fallback chain (if one model is overloaded, try next)
+const GEMINI_MODELS = [
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b"
+];
+
 const GROQ_MODELS = [
   "meta-llama/llama-4-scout-17b-16e-instruct",
   "llama-3.3-70b-versatile",
@@ -21,8 +28,15 @@ function getGroqKeys() {
   ].filter(Boolean);
 }
 
-function getGeminiKey() {
-  return process.env.GEMINI_KEY || "";
+function getGeminiKeys() {
+  return [
+    process.env.GEMINI_KEY_1,
+    process.env.GEMINI_KEY_2,
+    process.env.GEMINI_KEY_3,
+    process.env.GEMINI_KEY_4,
+    // Legacy single key still works
+    process.env.GEMINI_KEY,
+  ].filter(Boolean);
 }
 
 // Optional: simple shared secret to prevent random people calling your endpoint
@@ -81,20 +95,31 @@ async function callGroq(apiKey, model, incoming, tone, history) {
   return parseReplies(data?.choices?.[0]?.message?.content);
 }
 
-async function callGemini(apiKey, incoming, tone, history) {
+async function callGemini(apiKey, model, incoming, tone, history) {
   const prompt = buildSystemPrompt(tone) + `\n\nChat history: ${(history || []).slice(-4).join(" | ")}\nReply to: "${incoming}"`;
-  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 256, temperature: 0.85 }
-    })
-  });
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 256, temperature: 0.85 }
+      })
+    });
 
-  if (!res.ok) return null;
-  const data = await res.json();
-  return parseReplies(data?.candidates?.[0]?.content?.parts?.[0]?.text);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const msg = errBody?.error?.message || res.statusText;
+      console.error(`[Gemini] ${model} HTTP ${res.status}: ${msg}`);
+      return { error: `Gemini ${res.status}: ${msg}` };
+    }
+    const data = await res.json();
+    return parseReplies(data?.candidates?.[0]?.content?.parts?.[0]?.text);
+  } catch (e) {
+    console.error(`[Gemini] ${model} exception: ${e.message}`);
+    return { error: `Gemini exception: ${e.message}` };
+  }
 }
 
 function parseReplies(text) {
@@ -122,23 +147,30 @@ export default async function handler(req, res) {
   const { incoming, tone = "romantic", history = [] } = req.body || {};
   if (!incoming) return res.status(400).json({ error: "Missing 'incoming' field" });
 
-  const geminiKey = getGeminiKey();
+  const geminiKeys = getGeminiKeys();
   const groqKeys = getGroqKeys();
 
-  // 1. Try Gemini first
-  if (geminiKey) {
-    const result = await callGemini(geminiKey, incoming, tone, history);
-    if (result) return res.json({ suggestions: result, source: "gemini" });
+  let lastError = "No API keys configured";
+
+  // 1. Try Gemini — rotate keys × models
+  for (const key of geminiKeys) {
+    for (const model of GEMINI_MODELS) {
+      const result = await callGemini(key, model, incoming, tone, history);
+      if (Array.isArray(result)) return res.json({ suggestions: result, source: `gemini/${model}` });
+      if (result?.error) lastError = result.error;
+    }
   }
 
   // 2. Try Groq with key rotation
   for (const model of GROQ_MODELS) {
     for (const key of groqKeys) {
       const result = await callGroq(key, model, incoming, tone, history);
-      if (result) return res.json({ suggestions: result, source: "groq" });
+      if (Array.isArray(result)) return res.json({ suggestions: result, source: "groq" });
+      if (result?.error) lastError = result.error;
     }
   }
 
   // 3. All failed
-  return res.status(503).json({ error: "All AI engines unavailable", suggestions: [] });
+  console.error(`[suggest] All engines failed. Last error: ${lastError}`);
+  return res.status(503).json({ error: "All AI engines unavailable", lastError, suggestions: [] });
 }
