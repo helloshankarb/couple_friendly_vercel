@@ -5,10 +5,10 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 // Gemini model fallback chain (if one model is overloaded, try next)
+// Note: gemini-2.0-flash-lite removed — has limit:0 on free tier projects
 const GEMINI_MODELS = [
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-  "gemini-2.0-flash-lite"
 ];
 
 const GROQ_MODELS = [
